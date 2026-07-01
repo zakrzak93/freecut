@@ -1,0 +1,28 @@
+[project]
+name = "freecut"
+version = "0.1.0"
+description = "Conversation-driven video editor skill for Claude Code — free local transcription (fork of video-use)"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+dependencies = [
+    "requests",
+    "librosa",
+    "matplotlib",
+    "pillow",
+    "numpy",
+]
+
+[project.optional-dependencies]
+# Local Whisper transcription (default backend). Pick one:
+#   mlx-whisper is fastest on Apple Silicon.
+#   faster-whisper works on Linux / Windows / CPU / NVIDIA.
+whisper-mlx = ["mlx-whisper"]
+whisper-fast = ["faster-whisper"]
+animations = ["manim"]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = []
