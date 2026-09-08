@@ -18,7 +18,19 @@ Drop raw footage in a folder, chat with Claude Code, get `final.mp4` back. Works
 | `vibevoice`  | GPU cost | N (real diarization) | ❌ CUDA-only | Set `VIBEVOICE_ASR_URL`, pass `--backend vibevoice`. |
 | `elevenlabs` | Paid | N (Scribe diarization) | ✅ (cloud) | Set `ELEVENLABS_API_KEY`, pass `--backend elevenlabs`. |
 
-Everything downstream (`pack_transcripts.py`, `render.py`, EDL generation, the SKILL) is untouched — each backend emits the same `{"words": [...]}` shape.
+Each transcription backend emits the same `{"words": [...]}` shape. Scripted dialogue cleanup also has dedicated local audit and MP4/Premiere delivery helpers.
+
+### Scripted narration cleanup
+
+For recorded narration, the default is to preserve order and unique content, retain the last complete attempt in each local retry group, remove earlier starts, shorten excess pauses and investigate non-speech sounds. A supplied script is a reference, never a substitute for the audio transcript.
+
+Short acoustic attempts are checked independently because long Whisper transcripts can hide real retakes. Coughs and throat clearing are inspected separately from words and silence. Confirmed defects are cut; markers identify actual edits and specific review points.
+
+`helpers/dialogue_audit.py` collects source evidence and builds the actual edited audio timeline for review, including XML-only work. Short overlapping windows and independent acoustic islands expose attempts that broader transcripts can smooth away. Genuinely abandoned unfinished sentences are removed by default in narration; intentional trailing-off and project-specific instructions are respected.
+
+`helpers/dialogue_delivery.py` exports a single-source plan into a versioned MP4 and editable Premiere XML referencing the full original media. Technical export completion is separate from editorial readiness: only a current evidence-linked QA report with complete window and join reviews can produce `READY` and update the ready-delivery pointer. Use `--qa` during export or `--finalize` after reviewing an existing bundle. This workflow requires editorial judgment and does not guarantee perfect automatic detection.
+
+Read [the scripted-dialogue workflow](references/scripted-dialogue.md) for the decision rules, approval checkpoints and command examples.
 
 ## What it does
 

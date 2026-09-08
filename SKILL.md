@@ -1,17 +1,25 @@
 ---
 name: freecut
-description: Edit any video by conversation. Transcribe (locally, free, by default), cut, color grade, generate overlay animations, burn subtitles — for talking heads, montages, tutorials, travel, interviews. No presets, no menus. Ask questions, confirm the plan, execute, iterate, persist. Production-correctness rules are hard; everything else is artistic freedom.
+description: Edit video by conversation with local transcription. Clean scripted narration by keeping the last complete local takes, checking short false starts, pauses and non-speech sounds, and delivering matching MP4 and editable Premiere XML. Also supports montages, color, overlays and subtitles when requested.
 ---
 
 # freecut
 
+## Scripted dialogue cleanup
+
+For recorded narration, a talking head following a script, or requests to remove retakes, false starts, silence, coughing or throat clearing, read [references/scripted-dialogue.md](references/scripted-dialogue.md) and the relevant `helpers/` code before editing. This is the default cleanup workflow for these requests. Its content-preservation rules override the generic montage/editor brief below; user instructions override this default.
+
+Use the script only for order and completeness, never to supply inaudible words or cut times. Keep the **last complete attempt in a local retry group**, remove earlier attempts in full, and preserve the original order and unique content. Confirmed defects are removed, not merely marked. Inspect short acoustic attempts separately: a fluent broad Whisper transcript can hide real starts and repetitions. Check non-speech sounds independently of ASR and silence detection. One reviewed keep plan must drive the current MP4 and editable XML; a new XML alone does not update an old MP4.
+
+For narration cleanup, remove genuinely abandoned unfinished sentences even without a later complete take; retain intentional trailing-off and follow project-specific user instructions. Before delivery, audit the actual edited audio with `dialogue_audit.py timeline`, including XML-only work. Review short overlapping windows, resolve conflicting readings with separate source attempts, and check final joins. A technical export is a draft until a current evidence-linked QA report passes delivery validation and `editorial_status` is `READY`. See the scripted-dialogue reference for the report and commands.
+
 ## Principle
 
-1. **LLM reasons from raw transcript + on-demand visuals.** The only derived artifact that earns its keep is a packed phrase-level transcript (`takes_packed.md`). Everything else — filler tagging, retake detection, shot classification, emphasis scoring — you derive at decision time.
+1. **Reason from source evidence.** Use the raw word transcript and `takes_packed.md` for navigation, then inspect source audio and on-demand visuals. Keep short-crop verification, acoustic event candidates and versioned cut decisions when they support reproducible edits; ASR text alone is not proof of clean delivery.
 2. **Audio is primary, visuals follow.** Cut candidates come from speech boundaries and silence gaps. Drill into visuals only at decision points.
 3. **Ask → confirm → execute → iterate → persist.** Never touch the cut until the user has confirmed the strategy in plain English.
 4. **Generalize.** Do not assume what kind of video this is. Look at the material, ask the user, then edit.
-5. **Artistic freedom is the default.** Every specific value, preset, font, color, duration, pitch structure, and technique in this document is a *worked example* from one proven video — not a mandate. Read them to understand what's possible and why each worked. Then make your own taste calls based on what the material actually is and what the user actually wants. **The only things you MUST do are in the Hard Rules section below.** Everything else is yours.
+5. **Artistic freedom is the default for creative choices.** Values, presets, fonts, colors and pitch structures below are examples, not a mandate. The Hard Rules and, when applicable, the scripted-dialogue contract and verification requirements still apply. Do not use creative freedom to override content preservation or evidence checks.
 6. **Invent freely.** If the material calls for a technique not described here — split-screen, picture-in-picture, lower-third identity cards, reaction cuts, speed ramps, freeze frames, crossfades, match cuts, L-cuts, J-cuts, speed ramps over breath, whatever — build it. The helpers are ffmpeg and PIL. They can do anything the format supports. Do not wait for permission.
 7. **Verify your own output before showing it to the user.** If you wouldn't ship it, don't present it.
 
@@ -24,15 +32,15 @@ These are the things where deviation produces silent failures or broken output. 
 3. **30ms audio fades at every segment boundary** (`afade=t=in:st=0:d=0.03,afade=t=out:st={dur-0.03}:d=0.03`). Otherwise audible pops at every cut.
 4. **Overlays use `setpts=PTS-STARTPTS+T/TB`** to shift the overlay's frame 0 to its window start. Otherwise you see the middle of the animation during the overlay window.
 5. **Master SRT uses output-timeline offsets**: `output_time = word.start - segment_start + segment_offset`. Otherwise captions misalign after segment concat.
-6. **Never cut inside a word.** Snap every cut edge to a word boundary from the transcript.
+6. **Never cut inside a word.** Start from raw word times, then verify the actual word end/onset in the source. ASR can omit words or place times early; the script and a low-energy threshold cannot establish safe boundaries on their own.
 7. **Pad every cut edge.** Working window: 30–200ms. ASR timestamps drift 50–100ms — padding absorbs the drift. Tighter for fast-paced, looser for cinematic.
 8. **Word-level verbatim ASR only.** Never SRT/phrase mode (loses sub-second gap data). Never normalized fillers (loses editorial signal).
-9. **Cache transcripts per source.** Never re-transcribe unless the source file itself changed.
+9. **Cache transcripts per source.** Preserve the original transcript. Verification of a suspected omission or restart may use separately cached short source crops, keyed by source fingerprint, interval, model and settings. Do not overwrite the original or repeat an unchanged cached verification run.
 10. **Parallel sub-agents for multiple animations.** Never sequential. Spawn N at once via the `Agent` tool; total wall time ≈ slowest one.
 11. **Strategy confirmation before execution.** Never touch the cut until the user has approved the plain-English plan.
 12. **All session outputs in `<videos_dir>/edit/`.** Never write inside the `freecut/` project directory.
 
-Everything else in this document is a worked example. Deviate whenever the material calls for it.
+Aesthetic examples are flexible. The scripted-dialogue contract and its evidence/delivery checks remain applicable requirements for that mode.
 
 ## Directory layout
 
@@ -77,10 +85,14 @@ Helpers (`helpers/transcribe.py`, `helpers/render.py`, etc.) live alongside this
 - **`timeline_view.py <video> <start> <end>`** — filmstrip + waveform PNG. On-demand visual drill-down. **Not a scan tool** — use it at decision points, not constantly.
 - **`render.py <edl.json> -o <out>`** — per-segment extract → concat → overlays (PTS-shifted) → subtitles LAST. `--preview` for 720p fast. `--build-subtitles` to generate master.srt inline.
 - **`grade.py <in> -o <out>`** — ffmpeg filter chain grade. Presets + `--filter '<raw>'` for custom.
+- **`dialogue_audit.py`** — prepare acoustic islands, independently transcribe short source windows, and optionally classify non-speech sound candidates locally. Produces evidence for review, not automatic edit decisions. See the scripted-dialogue reference and `--help`.
+- **`dialogue_delivery.py`** — validate a single-source keep plan and deliver a versioned, matching MP4/Premiere XML bundle with full original-media handles. Use this route for dialogue handoff instead of case-specific export scripts. See `--help` for approval and XML-only options.
 
 For animations, create `<edit>/animations/slot_<id>/` with `Bash` and spawn a sub-agent via the `Agent` tool.
 
 ## The process
+
+For scripted dialogue, follow `references/scripted-dialogue.md` and use `dialogue_audit.py` / `dialogue_delivery.py` for the audit and handoff. The generic `render.py` steps below apply to creative montage, grading and overlays, not as a replacement for the dialogue checks.
 
 1. **Inventory.** `ffprobe` every source. `transcribe_batch.py` on the directory. `pack_transcripts.py` to produce `takes_packed.md`. Sample one or two `timeline_view`s for a visual first impression.
 2. **Pre-scan for problems.** One pass over `takes_packed.md` to note verbal slips, obvious mis-speaks, or phrasings to avoid. Plain list, feed into the editor brief.
@@ -97,7 +109,7 @@ For animations, create `<edit>/animations/slot_<id>/` with `Bash` and spawn a su
    Also sample: first 2s, last 2s, and 2–3 mid-points — check grade consistency, subtitle readability, overall coherence. Run `ffprobe` on the output to verify duration matches the EDL expectation.
 
    If anything fails: fix → re-render → re-eval. **Cap at 3 self-eval passes** — if issues remain after 3, flag them to the user rather than looping forever. Only present the preview once the self-eval passes.
-8. **Iterate + persist.** Natural-language feedback, re-plan, re-render. Never re-transcribe. Final render on confirmation. Append to `project.md`.
+8. **Iterate + persist.** Natural-language feedback, re-plan, re-render. Reuse original transcripts and keyed verification caches; investigate new evidence with separate short crops when needed. Respect existing approval scope and any requested plan-before-render checkpoint. Append to `project.md` and identify which artifact version is current.
 
 ## Cut craft (techniques)
 
@@ -111,7 +123,7 @@ For animations, create `<edit>/animations/slot_<id>/` with `Bash` and spawn a su
 
 ## The packed transcript (primary reading view)
 
-`pack_transcripts.py` reads all `transcripts/*.json` and produces one markdown file where each take is a list of phrase-level lines, each prefixed with its `[start-end]` time range. Phrases break on any silence ≥ 0.5s OR speaker change. This is the artifact the editor sub-agent reads to pick cuts — it gives word-boundary precision from text alone at 1/10 the tokens of raw JSON.
+`pack_transcripts.py` reads all `transcripts/*.json` and produces phrase-level lines prefixed with `[start-end]`. Phrases break on ASR gaps ≥ 0.5s or speaker changes. This is a compact navigation view, not an acoustic silence detector or a source of word-boundary precision. Read the raw word records and verify the source before deciding cuts.
 
 Example line:
 ```
@@ -121,6 +133,8 @@ Example line:
 ```
 
 ## Editor sub-agent brief (for multi-take selection)
+
+This creative selection brief is for montages or rearrangement that the user requested. For scripted dialogue cleanup, use the brief in `references/scripted-dialogue.md`; do not reorder sentences, drop beats for runtime, or choose an earlier preferred delivery over the last complete local attempt.
 
 When the task is "pick the best take of each beat across many clips," spawn a dedicated sub-agent with a brief shaped like this. The structure is load-bearing; the pitch-shape example is not.
 
@@ -318,5 +332,7 @@ Things that consistently fail regardless of style:
 - **Typing text centered on the partial string.** Text slides left as it grows.
 - **Sequential sub-agents for multiple animations.** Always parallel.
 - **Editing before confirming the strategy.** Never.
-- **Re-transcribing cached sources.** Immutable outputs of immutable inputs.
+- **Replacing a cached transcript to hide disagreements.** Preserve it; store source-crop verification separately with provenance.
+- **Treating fluent Whisper text as proof of no retakes, or empty ASR as silence.** Inspect short attempts and non-speech sound candidates.
+- **Calling a marker a removal, or shipping an old MP4 with a new XML.** Verify the actual keep ranges and the matching delivery manifest.
 - **Assuming what kind of video it is.** Look first, ask second, edit last.

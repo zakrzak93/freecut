@@ -65,6 +65,18 @@ python -c 'import platform,sys; sys.exit(0 if platform.system()=="Darwin" and pl
 
 The first real transcription will download the model weights on demand (default: `small`, ~500 MB).
 
+For scripted-dialogue verification, `helpers/dialogue_audit.py transcribe` defaults to large-v3 (or its mlx equivalent) and reads short acoustic windows independently. Weights download only when requested transcription runs. Setup alone does not authorize processing footage.
+
+Optional local sound-event classification uses the `audio-events` extra. Install it when this workflow needs classification and no suitable existing local runtime is available:
+
+```bash
+uv sync --extra whisper-fast --extra audio-events
+# Apple Silicon: uv sync --extra whisper-mlx --extra audio-events
+# pip alternative: python -m pip install -e '.[whisper-fast,audio-events]'
+```
+
+This is local inference with no API keys. It adds PyTorch/torchaudio/Transformers and may download substantial packages and model weights. Preserve the chosen Whisper extra when syncing; do not silently switch to a paid transcription or audio service.
+
 ### 4. Install ffmpeg (+ optional yt-dlp)
 
 `ffmpeg` and `ffprobe` are hard requirements. `yt-dlp` is only needed if the user wants to pull sources from URLs. Animation engines such as HyperFrames, Remotion, and Manim are installed lazily the first time a project actually needs them.
@@ -139,6 +151,8 @@ Run one real thing. Prefer the lightest verification that still proves the pipel
 ```bash
 python ~/Developer/freecut/helpers/timeline_view.py --help >/dev/null && echo "helpers OK"
 python ~/Developer/freecut/helpers/transcribe.py --help >/dev/null && echo "transcribe OK"
+python ~/Developer/freecut/helpers/dialogue_audit.py --help
+python ~/Developer/freecut/helpers/dialogue_delivery.py --help
 ffprobe -version | head -1
 ```
 
@@ -157,7 +171,7 @@ Tell the user, in one short message:
 ## Keeping the skill current
 
 - `cd ~/Developer/freecut && git pull --ff-only` pulls the latest code. The symlink auto-picks it up on the next run.
-- If `pyproject.toml` changed deps, re-run `uv sync` / `pip install -e .` after pulling.
+- If `pyproject.toml` changed deps, re-run `uv sync --extra whisper-fast` (or `--extra whisper-mlx` on Apple Silicon), retaining `--extra audio-events` if installed; the pip equivalent is `pip install -e '.[whisper-fast,audio-events]'` with only the extras actually used.
 
 ## Cold-start reminders
 

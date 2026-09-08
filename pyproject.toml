@@ -1,7 +1,7 @@
 [project]
 name = "freecut"
 version = "0.1.0"
-description = "Conversation-driven video editor skill for Claude Code — free local transcription (fork of video-use)"
+description = "Conversation-driven video editor skill for Codex and Claude Code with local dialogue auditing and editable delivery"
 license = { file = "LICENSE" }
 requires-python = ">=3.10"
 dependencies = [
@@ -18,6 +18,8 @@ dependencies = [
 #   faster-whisper works on Linux / Windows / CPU / NVIDIA.
 whisper-mlx = ["mlx-whisper"]
 whisper-fast = ["faster-whisper"]
+# Optional local sound-event evidence for coughing/throat clearing; never auto-cuts.
+audio-events = ["torch>=2.6", "torchaudio>=2.6", "transformers>=4.40,<5"]
 animations = ["manim"]
 
 [build-system]
