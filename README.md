@@ -47,7 +47,7 @@ Read [the scripted-dialogue workflow](references/scripted-dialogue.md) for the d
 Paste into Claude Code, Codex, Hermes, Openclaw, or any agent with shell access:
 
 ```text
-Set up https://github.com/Moh4696/freecut for me.
+Set up https://github.com/zakrzak93/freecut for me.
 
 Read install.md first to install this repo, wire up ffmpeg, register the skill
 with whichever agent you're running under, and install a local Whisper backend
@@ -75,7 +75,7 @@ It inventories the sources, proposes a strategy, waits for your OK, then produce
 
 ```bash
 # 1. Clone and symlink into your agent's skills directory
-git clone https://github.com/Moh4696/freecut ~/Developer/freecut
+git clone https://github.com/zakrzak93/freecut ~/Developer/freecut
 ln -sfn ~/Developer/freecut ~/.claude/skills/freecut          # Claude Code
 # ln -sfn ~/Developer/freecut ~/.codex/skills/freecut         # Codex
 

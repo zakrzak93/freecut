@@ -35,7 +35,7 @@ And one thing must be true about the current agent:
 ### 1. Clone to a stable path
 
 ```bash
-test -d ~/Developer/freecut || git clone https://github.com/Moh4696/freecut ~/Developer/freecut
+test -d ~/Developer/freecut || git clone https://github.com/zakrzak93/freecut ~/Developer/freecut
 cd ~/Developer/freecut
 ```
 
