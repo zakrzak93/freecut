@@ -25,7 +25,7 @@ import subprocess
 import wave
 from fractions import Fraction
 
-VERSION = 3
+VERSION = 4
 SR = 16000
 
 
@@ -233,6 +233,7 @@ def timeline(args):
     decoded, audio = folder / "source_decoded_16k.wav", folder / "timeline_16k.wav"
     subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(source), "-map", "0:a:0",
                     "-vn", "-ac", "1", "-ar", str(SR), "-c:a", "pcm_s16le", str(decoded)], check=True)
+    decoded_fp = fingerprint(decoded)
     mapping = []
     with wave.open(str(decoded), "rb") as original, wave.open(str(audio), "wb") as output:
         if (original.getnchannels(), original.getsampwidth(), original.getframerate()) != (1, 2, SR):
@@ -277,8 +278,11 @@ def timeline(args):
         raise ValueError("Original source changed during timeline generation; run timeline again")
     if fingerprint(plan_path) != plan_fp:
         raise ValueError("Timeline plan changed during generation; run timeline again")
+    if fingerprint(decoded) != decoded_fp:
+        raise ValueError("Decoded source audio changed during generation; run timeline again")
     write_json(manifest, {"settings": settings, "time_basis": "output",
                          "source_sha256": source_fp["sha256"], "plan_sha256": plan_fp["sha256"],
+                         "source_audio": decoded_fp,
                          "source_map": fingerprint(map_path), "source_map_path": str(map_path),
                          "source_map_sha256": fingerprint(map_path)["sha256"],
                          "audio": str(audio), "audio_sha256": fingerprint(audio)["sha256"],
@@ -334,6 +338,11 @@ def checked_manifest(path):
     if fingerprint(data["settings"]["source"]["path"]) != data["settings"]["source"]:
         raise ValueError("Original source changed; run prepare again")
     if data.get("time_basis") == "output":
+        decoded_fp = data.get("source_audio")
+        if not isinstance(decoded_fp, dict) or not decoded_fp.get("path") or not decoded_fp.get("sha256"):
+            raise ValueError("Timeline lacks decoded source audio binding; regenerate with current timeline command")
+        if fingerprint(decoded_fp["path"]) != decoded_fp:
+            raise ValueError("Decoded source audio changed; regenerate timeline")
         plan_fp, map_fp = data["settings"]["plan"], data["source_map"]
         if fingerprint(plan_fp["path"]) != plan_fp or plan_fp["sha256"] != data["plan_sha256"]:
             raise ValueError("Timeline plan changed; run timeline again")

@@ -60,11 +60,48 @@ class QaFixture:
         self.evidence = self.folder / 'review.txt'
         self.evidence.write_text('Independent reviewer evidence fixture', encoding='utf-8')
         self.report_path = self.folder / 'qa.json'
-        self.report = dict(version=1, source_sha256=q.digest(self.source), plan_sha256=q.digest(self.plan_path),
+        self.report = dict(version=2, source_sha256=q.digest(self.source), plan_sha256=q.digest(self.plan_path),
             audit_manifest=self.ref(self.manifest_path), evidence=[dict(id='ev', **self.ref(self.evidence))],
             reviewed_windows=[dict(id=x, evidence_ids=['ev']) for x in self.manifest['window_ids']],
             reviewed_seams=[dict(**self.manifest['seams'][0], evidence_ids=['ev'])],
             candidates=[], findings=[])
+        self.source_audio = self.folder / 'source_decoded_16k.wav'
+        with wave.open(str(self.source_audio), 'wb') as wav:
+            wav.setparams((1, 2, 16000, 0, 'NONE', 'not compressed'))
+            wav.writeframes(bytes(64000 * 2))
+        self.transcript = self.folder / 'transcript.json'
+        self.write(self.transcript, {})
+        checks = [dict(id='edge', kind='source_edge', source_ranges=[[.65, 1.35]],
+            output_ranges=[[.65, 1]], evidence_windows=[
+                dict(time_basis='source', role='kept', start=.65, end=1),
+                dict(time_basis='source', role='extended_context', start=.65, end=1.35)])]
+        self.inventory = dict(version=1, asr_complete=True, checks=checks, settings=dict(
+            manifest=self.ref(self.manifest_path), source=self.ref(self.source), plan=self.ref(self.plan_path),
+            source_map=self.ref(self.map_path), audio=self.ref(self.audio), source_audio=self.ref(self.source_audio),
+            transcript=self.ref(self.transcript), parameters={}))
+        self.inventory_path = self.folder / 'risks.json'
+        self.write(self.inventory_path, self.inventory)
+        self.report['risk_inventory'] = self.ref(self.inventory_path)
+        self.report['evidence'][0]['kind'] = 'review'
+        self.add_audio('timeline', self.audio, 'output', 'timeline', [[0, 3]])
+        self.add_audio('kept', self.source_audio, 'source', 'kept', [[0, 1], [2, 4]])
+        self.add_audio('context', self.source_audio, 'source', 'extended_context', [[0, 4]])
+        for row in self.report['reviewed_windows'] + self.report['reviewed_seams']:
+            row['evidence_ids'] = ['timeline']
+        self.report['check_reviews'] = [dict(id='edge', disposition='resolved_kept',
+            reason='Both source views checked', evidence_ids=['kept', 'context'])]
+        risk_patch = patch.object(q, 'risk_module', return_value=SimpleNamespace(
+            build_inventory=lambda *args: copy.deepcopy(self.inventory)))
+        risk_patch.start()
+        self.addCleanup(risk_patch.stop)
+        delivery_patch = patch.object(d, 'qa_module', return_value=q)
+        delivery_patch.start()
+        self.addCleanup(delivery_patch.stop)
+
+    def add_audio(self, ident, path, basis, role, ranges):
+        self.report['evidence'].append(dict(id=ident, **self.ref(path), kind='audio',
+            time_basis=basis, role=role, ranges=ranges, source_sha256=q.digest(self.source),
+            plan_sha256=q.digest(self.plan_path)))
 
     def write(self, path, value):
         Path(path).write_text(json.dumps(value), encoding='utf-8')
@@ -91,6 +128,114 @@ class QaTests(QaFixture, unittest.TestCase):
         self.assertEqual(self.validate()['editorial_status'], 'READY')
         self.report.update(passed=True, reviewed_windows=[], reviewed_seams=[])
         self.assertEqual(self.validate()['editorial_status'], 'REVIEW_REQUIRED')
+
+    def test_legacy_and_missing_inventory_never_ready(self):
+        self.report['version'] = 1
+        self.assertEqual(self.validate()['editorial_status'], 'REVIEW_REQUIRED')
+        self.report['version'] = 2
+        del self.report['risk_inventory']
+        self.assertEqual(self.validate()['editorial_status'], 'REVIEW_REQUIRED')
+
+    def test_filtered_inventory_and_skipped_checks(self):
+        altered = copy.deepcopy(self.inventory)
+        altered['checks'] = []
+        self.write(self.inventory_path, altered)
+        self.report['risk_inventory'] = self.ref(self.inventory_path)
+        with self.assertRaisesRegex(ValueError, 'deterministic'):
+            self.validate()
+        self.write(self.inventory_path, self.inventory)
+        self.report['risk_inventory'] = self.ref(self.inventory_path)
+        self.report['check_reviews'] = []
+        self.assertEqual(self.validate()['editorial_status'], 'REVIEW_REQUIRED')
+
+    def test_unrelated_or_prose_evidence_cannot_certify_all_ids(self):
+        for row in self.report['reviewed_windows'] + self.report['reviewed_seams']:
+            row['evidence_ids'] = ['ev']
+        self.assertEqual(self.validate()['editorial_status'], 'REVIEW_REQUIRED')
+        for row in self.report['reviewed_windows'] + self.report['reviewed_seams']:
+            row['evidence_ids'] = ['timeline']
+        self.report['evidence'][1]['ranges'] = [[0, .5]]
+        self.assertEqual(self.validate()['editorial_status'], 'REVIEW_REQUIRED')
+
+    def test_edge_requires_both_views_and_actual_change(self):
+        decision = self.report['check_reviews'][0]
+        decision['evidence_ids'] = ['context']
+        self.assertEqual(self.validate()['editorial_status'], 'REVIEW_REQUIRED')
+        decision['evidence_ids'] = ['kept', 'context']
+        decision.update(disposition='resolved_cut', source_frames=[20, 25])
+        with self.assertRaisesRegex(ValueError, 'retained frames'):
+            self.validate()
+        decision['source_frames'] = [25, 30]
+        self.assertEqual(self.validate()['editorial_status'], 'READY')
+        decision['disposition'] = 'unresolved'
+        self.assertEqual(self.validate()['editorial_status'], 'REVIEW_REQUIRED')
+
+    def test_asr_cannot_overclaim_selected_or_forged_windows(self):
+        artifact_path = self.folder / 'asr.json'
+        artifact = dict(time_basis='output', settings=dict(manifest=self.ref(self.manifest_path)),
+            windows=[dict(window_id='w0', start=0, end=1.5)])
+        self.write(artifact_path, artifact)
+        item = self.report['evidence'][1]
+        item.update(self.ref(artifact_path), kind='asr', window_ids=['w0'], ranges=[[0, 3]])
+        with self.assertRaisesRegex(ValueError, 'overclaims'):
+            self.validate()
+        artifact['windows'][0]['end'] = 3
+        self.write(artifact_path, artifact)
+        item.update(self.ref(artifact_path))
+        with self.assertRaisesRegex(ValueError, 'differs from its manifest'):
+            self.validate()
+
+    def test_waveform_requires_bound_audio_and_actual_ranges(self):
+        artifact_path = self.folder / 'waveform.json'
+        artifact = dict(time_basis='output', audio=self.ref(self.audio), ranges=[[0, .5]])
+        self.write(artifact_path, artifact)
+        item = self.report['evidence'][1]
+        item.update(self.ref(artifact_path), kind='waveform')
+        with self.assertRaisesRegex(ValueError, 'overclaims'):
+            self.validate()
+        artifact['ranges'] = [[0, 3]]
+        artifact['audio'] = self.ref(self.source_audio)
+        self.write(artifact_path, artifact)
+        item.update(self.ref(artifact_path))
+        with self.assertRaisesRegex(ValueError, 'declared audio view'):
+            self.validate()
+
+    def test_restoration_requires_newly_retained_frames(self):
+        previous = self.folder / 'previous.json'
+        self.write(previous, dict(source=str(self.source), ranges=[dict(start=0, end=.8), dict(start=2, end=4)]))
+        self.report['previous_plan'] = self.ref(previous)
+        self.report['check_reviews'][0].update(disposition='restored', source_frames=[20, 25])
+        self.assertEqual(self.validate()['editorial_status'], 'READY')
+        self.write(previous, self.plan)
+        self.report['previous_plan'] = self.ref(previous)
+        with self.assertRaisesRegex(ValueError, 'already existed'):
+            self.validate()
+
+    def test_many_evidence_rows_hash_each_media_once_plus_fresh_recheck(self):
+        for i in range(600):
+            row = copy.deepcopy(self.report['evidence'][1])
+            row['id'] = f'extra_{i}'
+            self.report['evidence'].append(row)
+        with patch.object(q, 'hash_file', wraps=q.hash_file) as hashed:
+            self.assertEqual(self.validate()['editorial_status'], 'READY')
+        paths = [args.args[0] for args in hashed.call_args_list]
+        self.assertEqual(paths.count(self.source.resolve()), 2)
+        self.assertEqual(paths.count(self.audio.resolve()), 2)
+        self.assertEqual(paths.count(self.source_audio.resolve()), 2)
+        self.assertIsNone(q._DIGEST_CACHE.get())
+
+    def test_final_recheck_ignores_cache_even_with_unchanged_signature(self):
+        before = q.digest(self.evidence)
+        token = q._DIGEST_CACHE.set({})
+        try:
+            with patch.object(q, 'file_signature', return_value=('unchanged',)):
+                self.assertEqual(q.digest(self.evidence), before)
+                self.evidence.write_text('mutation', encoding='utf-8')
+                self.assertEqual(q.digest(self.evidence), before)
+                with self.assertRaisesRegex(ValueError, 'stale hash'):
+                    q.recheck_bindings([dict(path=str(self.evidence), sha256=before)] * 10)
+        finally:
+            q._DIGEST_CACHE.reset(token)
 
     def test_missing_window_or_seam_is_draft(self):
         original = copy.deepcopy(self.report)
@@ -197,9 +342,10 @@ class QaTests(QaFixture, unittest.TestCase):
         mp4 = self.folder / 'render.mp4'
         mp4.write_bytes(b'actual render fixture')
         self.assertEqual(self.validate(mp4)['editorial_status'], 'REVIEW_REQUIRED')
+        self.add_audio('render', mp4, 'output', 'render', [[0, 3]])
         self.report['render_review'] = dict(mp4_sha256=q.digest(mp4),
-            reviewed_windows=[dict(id=x, target='render', evidence_ids=['ev']) for x in ('w0', 'w2')],
-            reviewed_seams=[dict(**self.manifest['seams'][0], target='render', evidence_ids=['ev'])])
+            reviewed_windows=[dict(id=x, target='render', evidence_ids=['render']) for x in ('w0', 'w2')],
+            reviewed_seams=[dict(**self.manifest['seams'][0], target='render', evidence_ids=['render'])])
         self.assertEqual(self.validate(mp4)['editorial_status'], 'READY')
         self.report['render_review']['reviewed_seams'] = []
         self.assertEqual(self.validate(mp4)['editorial_status'], 'REVIEW_REQUIRED')
@@ -284,9 +430,10 @@ class DeliveryQaTests(QaFixture, unittest.TestCase):
         mp4.write_bytes(b'original render fixture')
         manifest.update(mode='render', mp4=dict(file=mp4.name, sha256=q.digest(mp4)), mp4_ready=True)
         self.write(folder / 'manifest.json', manifest)
+        self.add_audio('render', mp4, 'output', 'render', [[0, 3]])
         self.report['render_review'] = dict(mp4_sha256=q.digest(mp4),
-            reviewed_windows=[dict(id=x, target='render', evidence_ids=['ev']) for x in ('w0', 'w2')],
-            reviewed_seams=[dict(**self.manifest['seams'][0], target='render', evidence_ids=['ev'])])
+            reviewed_windows=[dict(id=x, target='render', evidence_ids=['render']) for x in ('w0', 'w2')],
+            reviewed_seams=[dict(**self.manifest['seams'][0], target='render', evidence_ids=['render'])])
         self.write(self.report_path, self.report)
         def review_then_mutate(*args):
             result = q.validate_qa(*args)

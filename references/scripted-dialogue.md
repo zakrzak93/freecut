@@ -72,7 +72,7 @@ For MP4, encode kept source segments once using the source timing, short audio e
 Before marking a requested bundle ready, verify:
 
 - Both artifacts were generated from the same canonical plan and source fingerprint; requested MP4 exists and is current, not an older version alongside a revised XML.
-- Every kept source frame appears once and in order; rejected intervals are excluded. Revisions preserve previous kept content except newly reviewed cuts.
+- Every kept source frame appears once and in order; rejected intervals are excluded. Revisions preserve previous kept content except explicitly reviewed cuts or evidence-backed edge restorations.
 - XML video and audio ranges map to the plan, full source media resolves, and markers are in the edited timeline coordinate system.
 - MP4 frame count, duration, A/V timing and full decode pass. Inspect changed seams and known prior failure points in the rendered output as well as the source.
 - The manifest identifies actual output filenames, plan/source hashes and which checks passed. An XML-only export is not a complete MP4 delivery. Structural XML validation is not proof of a successful live Premiere import.
@@ -90,18 +90,42 @@ Return candidate source intervals, the failed attempt and retained continuation,
 
 Create a separate `qa.json` only from the review actually performed. The validator checks consistency and evidence provenance; it cannot determine whether a human or agent truly understood speech. Do not mass-fill reviewed rows merely because ASR completed.
 
-The report uses `version: 1`, `source_sha256` and `plan_sha256` (the SHA256 of the **original plan file bytes**, not delivery's canonical JSON hash). Bind `audit_manifest` as `{ "path": "...", "sha256": "..." }`. Evidence entries are `{ "id": "E1", "path": "...", "sha256": "..." }`; paths are resolved relative to the report. Evidence may include actual ASR crops, waveform analyses and written reviewer decisions. Retain the original files.
+The current report uses `version: 2`, `source_sha256` and `plan_sha256` (the SHA256 of the **original plan file bytes**, not delivery's canonical JSON hash). Bind `audit_manifest` and `risk_inventory` as `{ "path": "...", "sha256": "..." }`. Paths resolve relative to their containing report or artifact. Version 1 remains readable but always requires review; it cannot earn `READY`.
+
+Generate an immutable, exhaustive risk inventory from the current timeline manifest and its completed ASR with `dialogue_risks.py`. It binds the manifest, original media, raw plan, map, edited PCM, verified decoded source PCM, transcript and detector parameters. It requires both endpoints of every retained clip, short kept clips, long output quiet gaps, independently detected micro-islands and adjacent ASR repeat candidates. These are review obligations, not automatic cuts or an exhaustive semantic detector. The validator regenerates the inventory: deleting difficult rows and recalculating its hash cannot certify the result. An inventory without `--transcript` is preliminary and cannot earn `READY`.
 
 Record these arrays:
 
-- `reviewed_windows`: `{ "id": "<manifest window ID>", "evidence_ids": ["E1"] }` for each window actually reviewed, including empty windows.
-- `reviewed_seams`: `{ "id": "<manifest seam ID>", "output_frame": 0, "left_source_end_frame": 0, "right_source_start_frame": 0, "evidence_ids": ["E1"] }`; replace all illustrative zeroes with the manifest's exact frame values. All current joins require evidence.
-- `candidates`: `{ "id": "F1", "source_frames": [100, 125], "kind": "false_start" }`; register every suspicion, including unfinished sentences and acoustic events. Example frames are illustrative, not cut recommendations.
-- `findings`: one decision per candidate ID, with `disposition` (`removed`, `retained_with_reason` or `unresolved`), a nonempty `reason` and `evidence_ids`. A confirmed removal must actually be absent from the keep plan. Preserve rejected suspicions with their reasons instead of deleting their records.
+- `reviewed_windows`: `{ "id": "<manifest window ID>", "evidence_ids": ["E1"] }` for each window actually reviewed, including empty windows. Referenced output evidence must cover that entire window.
+- `reviewed_seams`: `{ "id": "<manifest seam ID>", "output_frame": 0, "left_source_end_frame": 0, "right_source_start_frame": 0, "evidence_ids": ["E1"] }`; use the manifest's actual frame values. Evidence must cover one second on either side of each join, bounded by the timeline endpoints.
+- `check_reviews`: `{ "id": "<inventory check ID>", "disposition": "resolved_kept", "reason": "<specific observation>", "evidence_ids": ["E2", "E3"] }`. Account for every inventory ID exactly once; dispositions are `resolved_kept`, `resolved_cut`, `restored` and `unresolved`. Each review's evidence must cover **every** required `evidence_windows` interval with its specified `time_basis` and `role`. For every source edge, independently inspect both the retained side (`kept`) and the original source extending beyond the cut (`extended_context`). One broad ASR view does not stand in for both.
+- `candidates`: `{ "id": "F1", "source_frames": [100, 125], "kind": "false_start" }`; retain every editorial suspicion, including previously detected issues that disappeared after revision, unfinished sentences and acoustic events. Example frames are illustrative.
+- `findings`: one decision per candidate ID, with `disposition` (`removed`, `retained_with_reason` or `unresolved`), a nonempty `reason` and `evidence_ids`. A removed candidate must actually be outside the keep plan; a retained candidate must be fully inside it. Keep rejected suspicions with their reasons instead of deleting their records.
 
-For MP4, also supply `render_review` bound to `mp4_sha256`. Its `reviewed_windows` covers the first and last timeline window (deduplicated), and `reviewed_seams` covers every current seam; each row includes `target: "render"` and evidence from the actual MP4. Reuse the same identity/frame fields as above. Do not certify a render using only the internal XML audit WAV.
+A check review using `resolved_cut` or `restored` also requires `source_frames: [start, end]`, intersecting that check's source interval. A cut must be absent from the current plan. A restoration must be fully kept and newly added relative to a fingerprinted `previous_plan` reference in the QA report. Restore clipped consonants or word tails when source evidence supports them; do not restrict corrections to further deletions. Rebuild the timeline and inventory after changing the plan, review all new edges and carry earlier decisions into the candidate ledger. No disposition itself authorizes a new cut.
 
-Missing coverage, missing decisions or unresolved findings keep `editorial_status` at `REVIEW_REQUIRED`. Invalid identities, changed evidence, stale plan/source or mismatching removal claims are errors. A new plan requires a new report; unchanged source evidence can be linked again after checking that it still applies, but old output offsets and joins cannot be copied blindly. Record any unavailable inspection honestly.
+Evidence entries contain `id`, `path`, `sha256`, `kind`, `time_basis`, `ranges`, `source_sha256` and `role`. Output evidence additionally requires the current raw `plan_sha256`. Use numeric second pairs for `ranges`; source and output limits are checked independently. Kinds are `audio`, `waveform`, `asr` and `review`; roles are `kept`, `extended_context`, `candidate`, `timeline` and `render`. A written `review` supports reasoning but never earns acoustic coverage by itself. Do not declare an entire file reviewed when only a small interval was inspected.
+
+```json
+{
+  "id": "E2",
+  "path": "/footage/edit/timeline-audit/source_decoded_16k.wav",
+  "sha256": "<actual file digest>",
+  "kind": "audio",
+  "time_basis": "source",
+  "ranges": [[12.0, 12.35]],
+  "source_sha256": "<original media digest>",
+  "role": "kept"
+}
+```
+
+Use the actual source-audio path from `risk_inventory.settings.source_audio`, not the illustrative path above. `audio` evidence must reference that verified source PCM, the bound timeline PCM for output, or the actual MP4 for `render`. Only claim audio inspection when supported and actually performed. A waveform evidence file is JSON containing `audio: {path, sha256}`, `time_basis` and `ranges`; its bound audio must be the corresponding verified view and its ranges must contain the claimed evidence scope. Preserve the measurements/plots and observations used in the review alongside this metadata; metadata alone is not an acoustic examination.
+
+ASR evidence requires `window_ids` selecting actual rows from the fingerprinted transcript. The selected IDs and their intervals must match the bound manifest's `window_ids` and `windows`; declared ranges cannot exceed those selected windows. Source ASR must trace to the original media or verified decoded source PCM, and output ASR must bind the current timeline manifest. A `kept` source ASR window must lie entirely in retained material; prepare a separate crop for the extended source context. A complete job or fluent transcript is never proof that a restart or boundary is correct.
+
+For MP4, also supply `render_review` bound to `mp4_sha256`. Its `reviewed_windows` covers the first and last timeline window (deduplicated), and `reviewed_seams` covers every current seam; each row includes `target: "render"` and scoped output evidence with `role: "render"` from the actual MP4. Reuse the same identity/frame fields as above. Do not certify a render using only the internal XML audit WAV.
+
+Missing inventory, incomplete ASR, missing scoped coverage, missing check/candidate decisions or unresolved findings keep `editorial_status` at `REVIEW_REQUIRED`. Invalid identities, changed evidence, stale plan/source or mismatching removal claims are errors. A new plan requires a new report; unchanged source evidence can be linked again after checking that it still applies, but old output offsets and joins cannot be copied blindly. Record any unavailable inspection honestly.
 
 ```bash
 # Export an XML draft; no READY pointer is updated.
@@ -132,7 +156,10 @@ After the initial keep plan exists, prepare and review its actual output timelin
 python helpers/dialogue_audit.py timeline --plan /footage/edit/plan.json --out-dir /footage/edit/timeline-audit
 python helpers/dialogue_audit.py transcribe --manifest /path/printed/timeline/manifest.json --language pl --device cuda
 python helpers/dialogue_audit.py events --manifest /path/printed/timeline/manifest.json --transcript /path/printed/transcript.json --classify --device cpu
+python helpers/dialogue_risks.py --manifest /path/printed/timeline/manifest.json --transcript /path/printed/transcript.json --out /footage/edit/risks-v1.json
 ```
+
+Use the inventory's exact source evidence windows to prepare independent kept and extended-context crops with `prepare --windows ...`; inspect waveform boundaries for every edge, not only ASR disagreements. Review micro-islands independently even when ASR labels them as words. Then write the QA report from completed observations. For XML-only delivery, full timeline review plus all source-edge/risk obligations is sufficient; no MP4 is required. For render delivery, first create a technical draft, inspect its actual MP4 endpoints and joins, add `render_review`, then finalize that same bundle.
 
 Timeline windows use **output time**; source crops prepared by `prepare` use **source time**. Always use the timeline map to convert a suspected interval, including intervals crossing more than one clip. Use the manifest's window and seam identities in the review report rather than inventing offsets.
 
