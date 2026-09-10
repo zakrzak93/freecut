@@ -1,6 +1,6 @@
 ---
 name: freecut
-description: Edit video by conversation with local transcription. Clean scripted narration by keeping the last complete local takes, checking short false starts, pauses and non-speech sounds, and delivering matching MP4 and editable Premiere XML. Also supports montages, color, overlays and subtitles when requested.
+description: Edit video by conversation with local transcription. Clean scripted narration by keeping the last complete local takes and checking false starts, breaths and word boundaries. Deliver editable source-based Premiere XML or a rendered MP4 as requested. Also supports creative video edits.
 ---
 
 # freecut
@@ -9,7 +9,11 @@ description: Edit video by conversation with local transcription. Clean scripted
 
 For recorded narration, a talking head following a script, or requests to remove retakes, false starts, silence, coughing or throat clearing, read [references/scripted-dialogue.md](references/scripted-dialogue.md) and the relevant `helpers/` code before editing. This is the default cleanup workflow for these requests. Its content-preservation rules override the generic montage/editor brief below; user instructions override this default.
 
-Use the script only for order and completeness, never to supply inaudible words or cut times. Keep the **last complete attempt in a local retry group**, remove earlier attempts in full, and preserve the original order and unique content. Confirmed defects are removed, not merely marked. Inspect short acoustic attempts separately: a fluent broad Whisper transcript can hide real starts and repetitions. Check non-speech sounds independently of ASR and silence detection. One reviewed keep plan must drive the current MP4 and editable XML; a new XML alone does not update an old MP4.
+Use the script only for order and completeness, never to supply inaudible words or cut times. Keep the **last complete attempt in a local retry group**, remove earlier attempts in full, and preserve the original order and unique content. Confirmed defects are removed, not merely marked. Verify that the input is the full source rather than a previous flattened edit. Complete the independent source review, breath review and boundary decisions **before freezing the delivery plan**; follow the staged workflow in the reference. A fluent Whisper transcript, including short crops, can hide retries. When both MP4 and XML are requested, one reviewed keep plan must drive both.
+
+For this installation's user, narration delivery defaults to **XML only, separate editable clips with full source handles, one mono audio track and no markers or content labels**. Keep review notes outside the timeline. Do not render an MP4 unless requested. These are this user's preferences, not universal creative-edit rules; an explicit project instruction overrides them. Preserve the user's manual edits when revising an existing sequence.
+
+The same user's **standard narration-cleanup profile** is aggressive: detect silence candidates longer than 175 ms, preserve speech islands at least 175 ms long, and protect 175 ms before and after retained speech. Remove confirmed non-content breaths and mouth noises even when they are loud; do not keep them merely to make the delivery sound "natural." Never cut a phoneme, quiet consonant, vowel tail or meaningful hesitation. This is the normal workflow, not a separate fast mode. Reuse immutable source analysis, batch editorial decisions into one plan, and perform one complete current-timeline QA after the batch instead of restarting every expensive pass after each small correction. Details and certification rules are in the scripted-dialogue reference.
 
 For narration cleanup, remove genuinely abandoned unfinished sentences even without a later complete take; retain intentional trailing-off and follow project-specific user instructions. Before delivery, audit the actual edited audio with `dialogue_audit.py timeline`, including XML-only work. Review short overlapping windows, resolve conflicting readings with separate source attempts, and check final joins. Generate `dialogue_risks.py` obligations for the full current timeline; independently review every source edge in both kept and extended-source views, plus short clips and micro-islands. Record an explicit evidence-backed resolution for every risk and editorial candidate. Restore clipped speech when justified. A technical export remains a draft until scoped QA v2 passes and `editorial_status` is `READY`; legacy QA v1 cannot certify it. See the scripted-dialogue reference for the report and commands.
 
@@ -29,7 +33,7 @@ These are the things where deviation produces silent failures or broken output. 
 
 1. **Subtitles are applied LAST in the filter chain**, after every overlay. Otherwise overlays hide captions. Silent failure.
 2. **Per-segment extract → lossless `-c copy` concat**, not single-pass filtergraph. Otherwise you double-encode every segment when overlays are added.
-3. **30ms audio fades at every segment boundary** (`afade=t=in:st=0:d=0.03,afade=t=out:st={dur-0.03}:d=0.03`). Otherwise audible pops at every cut.
+3. **30ms audio fades at rendered segment boundaries** (`afade=t=in:st=0:d=0.03,afade=t=out:st={dur-0.03}:d=0.03`). For editable XML, audit the actual timeline behavior; do not add fades only to an audit WAV or create a flattened render to simulate editable clips.
 4. **Overlays use `setpts=PTS-STARTPTS+T/TB`** to shift the overlay's frame 0 to its window start. Otherwise you see the middle of the animation during the overlay window.
 5. **Master SRT uses output-timeline offsets**: `output_time = word.start - segment_start + segment_offset`. Otherwise captions misalign after segment concat.
 6. **Never cut inside a word.** Start from raw word times, then verify the actual word end/onset in the source. ASR can omit words or place times early; the script and a low-energy threshold cannot establish safe boundaries on their own.
@@ -338,3 +342,14 @@ Things that consistently fail regardless of style:
 - **Treating fluent Whisper text as proof of no retakes, or empty ASR as silence.** Inspect short attempts and non-speech sound candidates.
 - **Calling a marker a removal, or shipping an old MP4 with a new XML.** Verify the actual keep ranges and the matching delivery manifest.
 - **Assuming what kind of video it is.** Look first, ask second, edit last.
+
+## Local Codex installation (Windows)
+
+- Repository: `C:/Users/zakrz/Documents/Codex/freecut`; registered as `C:/Users/zakrz/.codex/skills/freecut` via a directory junction.
+- Run helpers with `C:/Users/zakrz/Documents/Codex/freecut/.venv/Scripts/python.exe` so the installed dependencies and local faster-whisper backend are used. Resolve helper paths relative to this SKILL.md and read the relevant helper code before editing.
+- To update dependencies, use `uv sync --extra whisper-fast` in the repository (keep the local Whisper extra enabled).
+- FFmpeg and ffprobe are available on PATH. No API keys are needed. Model weights download on the first requested transcription.
+- Setup alone does not authorize transcription. Wait for the user to supply a footage folder and request work.
+- Use Python's `-X utf8` option when invoking helpers on Windows to preserve Unicode transcripts and console output. For rendering, use forward-slash paths and check FFmpeg filter escaping for drive-letter paths (especially subtitle files and grade-analysis temporary files).
+- For GPU transcription in this installation, prepend these existing CUDA library directories to the helper process PATH: `C:/Users/zakrz/AppData/Local/Programs/Python/Python312/Lib/site-packages/nvidia/cublas/bin` and `C:/Users/zakrz/AppData/Local/Programs/Python/Python312/Lib/site-packages/nvidia/cudnn/bin`. An import-only check does not verify these inference-time DLLs.
+- The optional `dialogue_audit.py events --classify` route has also been tested with the existing `C:/Users/zakrz/AppData/Local/Programs/Python/Python312/python.exe` runtime (PyTorch/Transformers and CUDA). It can read manifests and transcripts prepared by the repository environment, so reuse it for sound-event classification rather than reinstalling a second heavy stack unnecessarily. Continue using the repository environment for `prepare`, Whisper transcription and delivery.

@@ -156,7 +156,21 @@ def canonical_plan(plan, info):
         if not 0 <= a <= b <= full:
             raise ValueError('Note outside source')
         notes.append(dict(row, start_frame=a, end_frame=b))
-    return dict(ranges=ranges, removals=removals, notes=notes, output_frames=cursor)
+    marker_rows = removals + notes
+    requested = plan.get('timeline_marker_ids')
+    if requested is not None:
+        if (not isinstance(requested, list) or len(requested) != len(set(requested)) or
+                any(not isinstance(x, str) or not x for x in requested)):
+            raise ValueError('timeline_marker_ids must be a unique list of nonempty ids')
+        indexed = {row.get('id'): row for row in marker_rows}
+        if any(ident not in indexed for ident in requested):
+            raise ValueError('timeline_marker_ids refers to an unknown review item')
+        marker_rows = [indexed[ident] for ident in requested]
+    audio_mode = plan.get('xml_audio_mode', 'source')
+    if audio_mode not in ('source', 'mono-left'):
+        raise ValueError('xml_audio_mode must be source or mono-left')
+    return dict(ranges=ranges, removals=removals, notes=notes, markers=marker_rows,
+                xml_audio_mode=audio_mode, output_frames=cursor)
 
 
 def map_source(t, ranges):
@@ -178,9 +192,10 @@ def build_xml(source, info, edit):
     e(seq,'name','Dialogue edited');e(seq,'duration',edit['output_frames']);rate(seq)
     tc=e(seq,'timecode');rate(tc);e(tc,'string','00:00:00:00');e(tc,'frame',0);e(tc,'displayformat','NDF')
     m=e(seq,'media');v=e(m,'video');sample(e(v,'format')); tracks=[e(v,'track')]
-    audio=e(m,'audio');e(audio,'numOutputChannels',info['channels'])
+    output_channels = 1 if edit.get('xml_audio_mode') == 'mono-left' else info['channels']
+    audio=e(m,'audio');e(audio,'numOutputChannels',output_channels)
     outputs=e(audio,'outputs')
-    for ch in range(1,info['channels']+1):
+    for ch in range(1,output_channels+1):
         group=e(outputs,'group');e(group,'index',ch);e(group,'numchannels',1);e(group,'downmix',0)
         channel=e(group,'channel');e(channel,'index',ch)
         tr=e(audio,'track');e(tr,'outputchannelindex',ch);tracks.append(tr)
@@ -201,7 +216,7 @@ def build_xml(source, info, edit):
             for linked in range(len(tracks)):
                 link=e(clip,'link');e(link,'linkclipref',f'clip-{i}-{linked}');e(link,'mediatype','audio' if linked else 'video');e(link,'trackindex',linked or 1);e(link,'clipindex',i)
                 if linked:e(link,'groupindex',1)
-    for row in edit['removals']+edit['notes']:
+    for row in edit.get('markers',edit['removals']+edit['notes']):
         marker=e(seq,'marker');e(marker,'name',row.get('id','REVIEW'));e(marker,'comment',row.get('reason',row.get('text','Review'))+' | '+row.get('keep_note','')+f" | source {row['start']}..{row.get('end',row['start'])} s")
         start=min(map_source(row['start_frame'],edit['ranges']),edit['output_frames']-1)
         e(marker,'in',start);e(marker,'out',-1)
@@ -229,7 +244,10 @@ def validate_xml(path, source, info, edit):
     if len(seqs)!=1 or int(seqs[0].findtext('duration'))!=edit['output_frames']:
         raise ValueError('XML sequence duration/count mismatch')
     seq=seqs[0];tracks=seq.findall('./media/video/track')+seq.findall('./media/audio/track')
-    if len(tracks)!=1+info['channels']:raise ValueError('XML track count mismatch')
+    output_channels = 1 if edit.get('xml_audio_mode') == 'mono-left' else info['channels']
+    if len(tracks)!=1+output_channels:raise ValueError('XML track count mismatch')
+    if int(seq.findtext('./media/audio/numOutputChannels')) != output_channels:
+        raise ValueError('XML output channel count mismatch')
     ids={c.attrib['id'] for tr in tracks for c in tr.findall('clipitem')}
     for ch,tr in enumerate(tracks):
         clips=tr.findall('clipitem')
@@ -251,9 +269,9 @@ def validate_xml(path, source, info, edit):
     definition=root.find('.//file[pathurl]')
     if int(definition.findtext('duration'))!=info['frames'] or int(definition.findtext('./timecode/frame'))!=info.get('timecode_frame',0):
         raise ValueError('XML full source duration/timecode mismatch')
-    markers=seq.findall('marker')
-    if len(markers)!=len(edit['removals'])+len(edit['notes']):raise ValueError('XML marker count mismatch')
-    for marker,row in zip(markers,edit['removals']+edit['notes']):
+    markers=seq.findall('marker');marker_rows=edit.get('markers',edit['removals']+edit['notes'])
+    if len(markers)!=len(marker_rows):raise ValueError('XML marker count mismatch')
+    for marker,row in zip(markers,marker_rows):
         if int(marker.findtext('in'))!=min(map_source(row['start_frame'],edit['ranges']),edit['output_frames']-1):
             raise ValueError('XML marker position mismatch')
     return True

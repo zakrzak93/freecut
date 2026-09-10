@@ -73,6 +73,25 @@ class DeliveryTests(unittest.TestCase):
         self.assertEqual(len(root.findall('.//marker')),2)
         self.assertIn('Keep full last take',root.findtext('.//marker/comment'))
 
+    def test_timeline_marker_ids_exports_only_requested_review_marker(self):
+        self.plan['notes']=[dict(id='F01',start=.5,end=.8,text='Pickup: 28–200 mm')]
+        self.plan['technical_reviews']=[dict(id='T1',start=.14,end=.5,reason='Internal review')]
+        self.plan['timeline_marker_ids']=['F01']
+        edit=d.canonical_plan(self.plan,self.info)
+        root=ET.fromstring(d.build_xml(r'C:\source.mp4',self.info,edit))
+        markers=root.findall('.//marker')
+        self.assertEqual([marker.findtext('name') for marker in markers],['F01'])
+        self.assertIn('Pickup: 28–200 mm',markers[0].findtext('comment'))
+
+    def test_mono_left_xml_uses_one_audio_track_from_stereo_source(self):
+        self.plan['xml_audio_mode']='mono-left'
+        edit=d.canonical_plan(self.plan,self.info)
+        root=ET.fromstring(d.build_xml(r'C:\source.mp4',self.info,edit))
+        self.assertEqual(root.findtext('./sequence/media/audio/numOutputChannels'),'1')
+        self.assertEqual(len(root.findall('./sequence/media/audio/track')),1)
+        self.assertEqual({x.findtext('trackindex') for x in root.findall('./sequence/media/audio/track/clipitem/sourcetrack')},{'1'})
+        self.assertEqual(root.findtext('.//file/media/audio/channelcount'),'2')
+
     def test_existing_version_is_not_overwritten(self):
         with tempfile.TemporaryDirectory() as td:
             with self.assertRaisesRegex(ValueError,'already exists'):

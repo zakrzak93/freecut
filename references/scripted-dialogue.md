@@ -9,18 +9,51 @@ Read for narration/talking-head cleanup, retakes, word restarts, pauses, coughs 
 - Preserve sentence order and unique content. Do not summarize, target an arbitrary shorter runtime, or silently drop a sentence. Do not assemble a sentence from several takes when a complete final take exists.
 - For narration cleanup, remove the whole genuinely abandoned unfinished sentence even if no complete later attempt exists. Preserve intentional trailing-off, rhetorical fragments and complete author additions. Neither ASR ellipses nor absence from the script proves an unfinished sentence. Confirm abandonment from source evidence; unresolved meaning stays explicitly unresolved. Project-specific user instructions override this default.
 - If the speaker restarts only a word or clause and there is no complete sentence retake, remove an unambiguous abandoned local start while preserving the unique surrounding speech and the final complete continuation. Do not use this exception to construct new wording. If completeness, meaning or a safe boundary is unresolved, preserve the content and flag that specific uncertainty.
-- Remove confirmed false starts, truncated syllables, repeated word beginnings and non-content coughs/throat clears. Markers explain actual edits and genuine review points; they do not replace deleting a confirmed defect.
-- Shorten excess pauses while retaining natural articulation and breathing space. Do not interpret “remove silence” as eliminating every acoustic gap inside speech.
+- Remove confirmed false starts, truncated syllables, repeated word beginnings and non-content coughs/throat clears. Store decisions outside the timeline; add review markers only when requested. Markers never replace deleting a confirmed defect.
+- Apply the local standard cleanup profile below. Preserve articulation and protected word-boundary margins, but do not retain a confirmed breath or empty pause merely to make the delivery sound “natural.”
 - Work autonomously from the available footage. A user timestamp is useful additional evidence, not a prerequisite for investigating audible defects.
 
-## Evidence pass before the first render
+## Source and delivery preflight
+
+Record the requested artifacts, audio layout, marker policy and existing authorization in project history before expensive processing. Apply the local user defaults in SKILL.md without asking for the same approval again. Check the exporter's actual capabilities early; do not invent flags or silently substitute a flattened video for editable source clips.
+
+Inspect source provenance, not just extension or filename: project history, existing edit metadata/chapters, source references and duration can reveal that the supplied MP4 is already an export. If so, locate the full source and verify its relationship to this recording before selecting takes. A longer unrelated file is not automatically the original. If the original cannot be found, explain that missing source rather than claiming full handles on a flattened edit.
+
+For mono delivery, verify actual source channels and exported track/channel mapping; a track name does not establish mono. Preserve the full video source. Any necessary extracted mono audio must span the full source with verified sync, not be a shortened edited mix. Do not overwrite the original media.
+
+## Evidence pass before freezing the plan
 
 1. **Inventory and cache.** Read project history, probe the actual source frame rate/resolution/audio, and keep a fingerprinted, word-timed raw transcript. Use local Whisper: normally large-v3 for detailed dialogue review when resources permit; Apple Silicon can use mlx-whisper, other machines faster-whisper. A larger model alone does not fix repetition smoothing.
 2. **Review broad text and script.** Use phrase packing to navigate, flag missing or unexpected content, and group only nearby attempts. Never derive source cut times from the script.
 3. **Inspect short acoustic attempts independently.** Detect low-energy boundaries in the actual waveform. Read each short speech island on its own, with word timestamps, no script prompt and no carried-over previous-text context. Compare adjacent islands and use a wider context crop where an isolated fragment is unintelligible. Preserve both readings: a long crop can smooth “W Techno… W Technotronic…” into one fluent sentence; a tiny crop can hallucinate unrelated words.
 4. **Cover the full retained timeline.** Do not inspect only the obvious retakes or edit seams. Track which retained regions were checked, including empty/low-confidence ASR and unusually short retained islands. Subdivide long uninterrupted spans with overlapping context so their interiors are not ignored; do not mistake overlap in the verification windows for a retake in the source.
 5. **Check non-speech sounds separately.** Speech-free but acoustically active spans are candidates for coughs, throat clearing, clicks and breaths. ASR can omit these sounds; a silence detector cannot classify them. Use local sound-event classification when available, plus waveform, nearby spoken content, source frames and actual listening when supported. A low score does not rule a cough out; a high score is not permission to cut speech. Check the whole retained timeline, then inspect suspicious events more narrowly.
-6. **Resolve boundaries in source time.** Start with raw/verification word times, confirm the actual end and onset, and use frame-aligned boundaries with a small protective margin. Typical starting values from the accepted workflow: DC-removed RMS in 10 ms windows, -42 dBFS for quiet candidates, 0.35–0.5 s gaps for separate attempts, excess pauses ≥0.5 s shortened with roughly 120 ms of air per edge. These are configurable candidates, not universal thresholds or proof that a quiet consonant is absent. Use 30 ms audio edge fades in the rendered clips.
+6. **Resolve boundaries in source time.** Start with raw/verification word times, confirm the actual end and onset, and use frame-aligned boundaries with the protected margins from the standard profile. DC-removed RMS in 10 ms windows and roughly -42 dBFS remain useful for locating quiet regions, but amplitude is not a content decision: breaths can be loud and consonants can be quiet. Use 30 ms audio edge fades in rendered clips.
+
+For multi-take narration, and especially a report of missed repeats, complete an **independent pass over all retained source speech before the first final-output audit**. Prefer a different local decoding method, such as greedy CTC without a language model, alongside Whisper; actual listening is another option when available. Re-running the same decoder with shifted windows is not an independent pass. If that capability is unavailable, disclose the limitation and examine isolated attempts acoustically; do not claim independent recognition. CTC spelling and character timing are approximate, not safe cut points. Resolve suspected retries using separate first-attempt and final-continuation crops plus source boundaries. A first impulse may precede a whole failed word: removing the impulse alone can leave the repetition intact.
+
+Maintain one source candidate ledger for retries, abandoned sentences, breaths and edge restorations. Divide the entire retained duration into accounted-for review ranges, including the last quarter and cross-range continuations; reviewers return actual window IDs, observations and unresolved intervals. Do not reduce scrutiny toward the end or infer coverage from completed jobs.
+
+## Standard local cleanup profile
+
+For this installation's user, apply these values by default to scripted narration unless the project says otherwise:
+
+- **Remove silence candidates longer than 175 ms.** Treat this as a search threshold, not permission to cut blindly.
+- **Preserve speech islands at least 175 ms long.** Inspect shorter active islands rather than automatically deleting them; they may contain a clipped word, quiet consonant, retry, click or breath.
+- **Protect 175 ms before and 175 ms after retained speech.** When the margins overlap, keep the overlap. Align final edits to frames and verified acoustic boundaries.
+- **Remove confirmed non-content breaths, mouth noises, coughs and throat clears even when they exceed the quiet threshold.** Do not preserve a strong breath for pacing. Never trade away a phoneme, vowel tail, meaningful hesitation or unique spoken content.
+
+Inspect intra-phrase gaps, low-level beds and clip interiors, not only long silence or seams. Use narrow event crops as well as context: a long classifier window dominated by speech can hide a breath. Distinguish respiratory noise from quiet consonants and final vowel cycles; magnify the waveform or spectrogram near a proposed boundary. A weak tail can still be speech.
+
+## Freeze, audit and revise without repeated blind passes
+
+Complete and reconcile the source reviews, resolve known candidates, and batch the confirmed cuts/restorations before freezing one plan. Run the standard silence/breath scan once across the source, record all candidates in the same ledger as retries, and check the final quarter explicitly before export. Review source boundaries in both retained and extended views at this stage. Freeze referenced evidence files too; later observations go in new files, never into a file whose hash is already referenced. Then create the current timeline audit, full risk inventory and requested delivery. Final-output QA is a check of the selected edit, not the first systematic search for retries.
+
+If output review reveals a new class of miss, investigate all source regions susceptible to it and consolidate the resulting corrections before rebuilding. Do not loop through a whole export/transcription for each newly found word. Recheck every changed span and every new join immediately, then run one complete QA against the final current timeline; this final full QA is required for `READY`, but it should follow the correction batch rather than every individual edit. Never bypass that requirement or rebind old output proof by changing its hash.
+
+Reuse a source review only after checking the source/PCM identity, exact interval, evidence role and compatibility with the new keep ranges. Reuse verified metadata and immutable transcript caches; do not reprobe or retranscribe unchanged inputs without a reason. Coordinate GPU work centrally. One typed ASR proof may select many actually reviewed window IDs from the same transcript, avoiding repeated parsing; every window still needs its own review record. Assemble complete receipts before final validation, rather than running the expensive validator after every partial batch. For a comparable 20–25 minute single-source narration, aim for roughly 30–45 minutes end to end when local compute and caches permit; this is an operating target, not permission to skip evidence or a guaranteed deadline. If work runs longer, identify the current blocking stage instead of adding optional duplicate analyses.
+
+Use frame/sample-derived bounds for evidence and cover the required interval fully. For a rounding-only coverage failure, inspect a newly prepared slightly wider scope; do not weaken the validator, claim an unseen extension or rebuild the unchanged edit. After all current checks pass, finalize and deliver. Report the actual remaining stage; do not repeatedly say “nearly finished” while source selection remains open.
 
 ## Review the actual edited timeline
 
@@ -28,7 +61,7 @@ After selecting source ranges, run `timeline --plan ... --out-dir ...` even when
 
 Review all default 4-second windows with 1.25-second overlap, including quiet/empty windows and clip interiors. These configurable values are a starting point, not a guarantee against smoothing. Record each reviewed window and its evidence; completed ASR jobs alone do not count as review. Inspect short acoustic islands independently as well: even a four-second window can swallow an earlier two-word attempt.
 
-When adjacent or differently sized crops disagree about a repeated beginning, preserve the suspicion until it is resolved. Check the failed attempt and final continuation in separate source crops and inspect their actual boundaries. Use source frame mapping to distinguish two real utterances from the same utterance appearing in overlapping windows. A fluent wider crop cannot overrule evidence of a short retry. For unintelligible micro-crops, add context; use another cached local model only if the disagreement remains. Keep both readings and the decision evidence.
+When adjacent or differently sized crops disagree about a repeated beginning, preserve the suspicion until it is resolved. Check the failed attempt and final continuation in separate source crops and inspect their actual boundaries. Use source frame mapping to distinguish two real utterances from the same utterance appearing in overlapping windows. A fluent wider crop cannot overrule evidence of a short retry. For unintelligible micro-crops, add context and compare the independent source pass before commissioning further transcription. Keep both readings and the decision evidence.
 
 Review each final join with enough context to establish the preceding word's complete tail, exactly one last acceptable attempt and the subsequent words. Check newly edited spans and their joins again after every revision. Reuse old evidence only for unchanged source content; remap it into a new report bound to the current plan. A previous report never automatically approves a changed plan or new join.
 
@@ -45,6 +78,7 @@ The helpers automate evidence collection and delivery mechanics. They do **not**
 - Correctly encoded/exported video can still contain bad editorial choices. Passing ffprobe or full decoding is technical validation, not a listening or content-review certificate.
 - In the Śmierdziele case, "dziecko widziało", two earlier "ściskasz" attempts and an incomplete "nie ma skomplikowanych" survived broad review. Separate attempts and the actual edited timeline exposed them. Treat these as regression cases, not strings to remove automatically.
 - A cropped fluent passage was misread as "KONIEC"; another local model recovered its real content. Conversely, an impulse and breath were misread as "Dziękuję". Neither a familiar closing phrase nor a single decoder's confidence establishes spoken content.
+- In the Efekt motyla case, short Whisper windows still smoothed repeated “sami” and “reżyserzy”; a full independent source CTC pass exposed them. Low-amplitude final cycles in “filmie” and “niego” also needed restoration after magnified source inspection. These are failure examples, not strings or fixed durations to remove automatically.
 
 ## Plan, approval and correction
 
@@ -61,9 +95,9 @@ When the user reports a missed cut:
 
 ## MP4 and Premiere handoff
 
-Use one canonical plan for both outputs and a fresh version directory. The default requested pair is a viewable MP4 and a single edited Premiere XML sequence. Do not add an uncut comparison sequence by default; if specifically requested, name it unmistakably as an original/reference.
+Deliver only the requested artifacts in a fresh version directory, following the local user defaults in SKILL.md. If both MP4 and XML are requested, use one canonical plan for both. Do not add an uncut comparison sequence by default; if specifically requested, name it unmistakably as an original/reference.
 
-The XML must refer to the **full original source**, not the flattened rendered MP4 or bounded subclips. Preserve source in/out ranges, full-duration handles, video/audio alignment and links, actual frame rate, resolution and source timecode where supported. The user must be able to expand or shorten clip edges. Mark actual cut locations and content/boundary review points. Do not bake technical commentary or markers into the viewed image.
+The XML must refer to the **full original source**, not the flattened rendered MP4 or bounded subclips. Preserve source in/out ranges, full-duration handles, video/audio alignment and links, actual frame rate, resolution and source timecode where supported. The user must be able to expand or shorten clip edges. Verify separate linked clips, the requested audio layout and marker policy. With markers disabled, also check inherited source chapters/XMP and cached source-item markers in an existing project; do not alter original metadata silently. Keep technical commentary outside the viewed image and timeline.
 
 For Windows paths use a round-trip-tested Premiere-compatible local URI (`file://localhost/C%3a/...` with spaces and Unicode encoded). Resolve it back to the actual original media and check existence. Do not let a local drive become `\\C:\...`. If locating media fails, inspect the concrete path and fix the reference; do not rerender identical cuts as a solution to an import-path problem.
 
@@ -71,10 +105,10 @@ For MP4, encode kept source segments once using the source timing, short audio e
 
 Before marking a requested bundle ready, verify:
 
-- Both artifacts were generated from the same canonical plan and source fingerprint; requested MP4 exists and is current, not an older version alongside a revised XML.
+- When both artifacts are requested, both were generated from the same canonical plan and source fingerprint; the requested MP4 exists and is current, not an older version alongside a revised XML. XML-only delivery does not require an MP4.
 - Every kept source frame appears once and in order; rejected intervals are excluded. Revisions preserve previous kept content except explicitly reviewed cuts or evidence-backed edge restorations.
-- XML video and audio ranges map to the plan, full source media resolves, and markers are in the edited timeline coordinate system.
-- MP4 frame count, duration, A/V timing and full decode pass. Inspect changed seams and known prior failure points in the rendered output as well as the source.
+- XML video and audio ranges map to the plan, full source media resolves, and the audio layout matches the request. With markers disabled, verify zero exported markers/content labels; otherwise verify marker positions in edited-timeline coordinates.
+- For a requested MP4, frame count, duration, A/V timing and full decode pass. Inspect changed seams and known prior failure points in the rendered output as well as the source.
 - The manifest identifies actual output filenames, plan/source hashes and which checks passed. An XML-only export is not a complete MP4 delivery. Structural XML validation is not proof of a successful live Premiere import.
 - Technical export completion and editorial readiness are separate. Only a current validated QA report can produce `editorial_status: READY` and update a ready-delivery pointer. A draft export may be structurally complete while its review is still required.
 
@@ -177,7 +211,7 @@ The delivery helper accepts a **single-source** plan. Source-relative paths reso
 }
 ```
 
-Use real source times, not this illustrative plan. Include `removals` with `id`, `start`, `end`, `reason` and optional `keep_note` for cut markers. If supplied, their union and the keep ranges must account for the whole source. Optional `source_fps`, `source_duration`, `source_sha256`, `total_duration_s`, `output_start` and `output_end` are validated when present. `technical_reviews` are also preserved as markers.
+Use real source times, not this illustrative plan. Keep `removals` with `id`, `start`, `end`, `reason` and optional `keep_note` in the decision plan even when timeline markers are disabled. If supplied, their union and the keep ranges must account for the whole source. Optional `source_fps`, `source_duration`, `source_sha256`, `total_duration_s`, `output_start` and `output_end` are validated when present. Set `timeline_marker_ids` to the exact unique note/removal IDs that should appear in the sequence; use an empty list for no markers and omit the field to retain the legacy behavior of exporting every review item. Set `xml_audio_mode` to `mono-left` for one mono sequence track sourced from channel 1, or omit it for the source-channel layout. Validate the requested marker and audio policy explicitly. Do not delete the decision ledger merely to suppress visible markers.
 
 ```bash
 # Export just the editable sequence for review; does not claim an MP4 exists.
